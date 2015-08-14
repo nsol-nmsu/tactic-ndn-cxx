@@ -24,142 +24,82 @@
 
 #include <boost/scope_exit.hpp>
 
+namespace ns3 {
+
+/// @cond include_hidden
+
+template<>
+struct EventMemberImplObjTraits<std::function<void()>> {
+  typedef std::function<void()> T;
+  static T&
+  GetReference(T& p)
+  {
+    return p;
+  }
+};
+
+/// @endcond
+
+} // namespace ns3
+
 namespace ndn {
 namespace util {
 namespace scheduler {
 
-class EventInfo : noncopyable
-{
-public:
-  EventInfo(time::nanoseconds after, const EventCallback& callback)
-    : expireTime(time::steady_clock::now() + after)
-    , isExpired(false)
-    , callback(callback)
-  {
-  }
-
-  time::nanoseconds
-  expiresFromNow() const
-  {
-    return std::max(expireTime - time::steady_clock::now(), time::nanoseconds::zero());
-  }
-
-public:
-  time::steady_clock::TimePoint expireTime;
-  bool isExpired;
-  EventCallback callback;
-  EventQueue::const_iterator queueIt;
-};
-
-EventId::operator bool() const
-{
-  return !m_info.expired() && !m_info.lock()->isExpired;
-}
-
-bool
-EventId::operator==(const EventId& other) const
-{
-  return (!(*this) && !other) ||
-         !(m_info.owner_before(other.m_info) || other.m_info.owner_before(m_info));
-}
-
-std::ostream&
-operator<<(std::ostream& os, const EventId& eventId)
-{
-  return os << eventId.m_info.lock();
-}
-
-bool
-EventQueueCompare::operator()(const shared_ptr<EventInfo>& a, const shared_ptr<EventInfo>& b) const
-{
-  return a->expireTime < b->expireTime;
-}
-
 Scheduler::Scheduler(boost::asio::io_service& ioService)
-  : m_timer(make_unique<detail::SteadyTimer>(ioService))
-  , m_isEventExecuting(false)
+  : m_scheduledEvent(m_events.end())
 {
 }
 
-Scheduler::~Scheduler() = default;
+Scheduler::~Scheduler()
+{
+  cancelAllEvents();
+}
 
 EventId
-Scheduler::scheduleEvent(time::nanoseconds after, const EventCallback& callback)
+Scheduler::scheduleEvent(const time::nanoseconds& after, const Event& event)
 {
-  BOOST_ASSERT(callback != nullptr);
+  EventId eventId = std::make_shared<ns3::EventId>();
+  weak_ptr<ns3::EventId> eventWeak = eventId;
+  std::function<void()> eventWithCleanup = [this, event, eventWeak] () {
+    event();
+    shared_ptr<ns3::EventId> eventId = eventWeak.lock();
+    if (eventId != nullptr) {
+      this->m_events.erase(eventId); // remove the event from the set after it is executed
+    }
+  };
 
-  EventQueue::iterator i = m_queue.insert(make_shared<EventInfo>(after, callback));
-  (*i)->queueIt = i;
+  ns3::EventId id = ns3::Simulator::Schedule(ns3::NanoSeconds(after.count()),
+                                             &std::function<void()>::operator(), eventWithCleanup);
+  *eventId = std::move(id);
+  m_events.insert(eventId);
 
-  if (!m_isEventExecuting && i == m_queue.begin()) {
-    // the new event is the first one to expire
-    this->scheduleNext();
-  }
-
-  return EventId(*i);
+  return eventId;
 }
 
 void
 Scheduler::cancelEvent(const EventId& eventId)
 {
-  shared_ptr<EventInfo> info = eventId.m_info.lock();
-  if (info == nullptr || info->isExpired) {
-    return; // event already expired or cancelled
-  }
-
-  if (info->queueIt == m_queue.begin()) {
-    m_timer->cancel();
-  }
-  m_queue.erase(info->queueIt);
-
-  if (!m_isEventExecuting) {
-    this->scheduleNext();
+  if (eventId != nullptr) {
+    ns3::Simulator::Remove(*eventId);
+    m_events.erase(eventId);
+    const_cast<EventId&>(eventId).reset();
   }
 }
 
 void
 Scheduler::cancelAllEvents()
 {
-  m_queue.clear();
-  m_timer->cancel();
-}
-
-void
-Scheduler::scheduleNext()
-{
-  if (!m_queue.empty()) {
-    m_timer->expires_from_now((*m_queue.begin())->expiresFromNow());
-    m_timer->async_wait(bind(&Scheduler::executeEvent, this, _1));
-  }
-}
-
-void
-Scheduler::executeEvent(const boost::system::error_code& error)
-{
-  if (error) { // e.g., cancelled
-    return;
-  }
-
-  m_isEventExecuting = true;
-
-  BOOST_SCOPE_EXIT(this_) {
-    this_->m_isEventExecuting = false;
-    this_->scheduleNext();
-  } BOOST_SCOPE_EXIT_END
-
-  // process all expired events
-  auto now = time::steady_clock::now();
-  while (!m_queue.empty()) {
-    auto head = m_queue.begin();
-    shared_ptr<EventInfo> info = *head;
-    if (info->expireTime > now) {
-      break;
+  for (auto i = m_events.begin(); i != m_events.end(); ) {
+    auto next = i;
+    ++next; // ns3::Simulator::Remove can call cancelEvent
+    if ((*i) != nullptr) {
+      ns3::Simulator::Remove((**i));
+      const_cast<EventId&>(*i).reset();
     }
-
-    m_queue.erase(head);
-    info->isExpired = true;
-    info->callback();
+    i = next;
   }
+  m_events.clear();
 }
 
 } // namespace scheduler

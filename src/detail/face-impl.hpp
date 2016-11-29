@@ -70,7 +70,7 @@ public:
     , m_processEventsTimeoutEvent(m_scheduler)
   {
     auto postOnEmptyPitOrNoRegisteredPrefixes = [this] {
-      this->m_face.getIoService().post([this] { this->onEmptyPitOrNoRegisteredPrefixes(); });
+      m_scheduler.scheduleEvent(time::seconds(0), bind(&Impl::onEmptyPitOrNoRegisteredPrefixes, this));
       // without this extra "post", transport can get paused (-async_read) and then resumed
       // (+async_read) from within onInterest/onData callback.  After onInterest/onData
       // finishes, there is another +async_read with the same memory block.  A few of such
@@ -371,7 +371,7 @@ public: // IO routine
   ensureConnected(bool wantResume)
   {
     if (!m_face.m_transport->isConnected())
-      m_face.m_transport->connect(m_face.m_ioService,
+      m_face.m_transport->connect(m_face.getIoService(),
                                   [=] (const Block& wire) { m_face.onReceiveElement(wire); });
 
     if (wantResume && !m_face.m_transport->isReceiving()) {
@@ -384,9 +384,6 @@ public: // IO routine
   {
     if (m_pendingInterestTable.empty() && m_registeredPrefixTable.empty()) {
       m_face.m_transport->pause();
-      if (!m_ioServiceWork) {
-        m_processEventsTimeoutEvent.cancel();
-      }
     }
   }
 
@@ -422,8 +419,6 @@ private:
   PendingInterestTable m_pendingInterestTable;
   InterestFilterTable m_interestFilterTable;
   RegisteredPrefixTable m_registeredPrefixTable;
-
-  unique_ptr<boost::asio::io_service::work> m_ioServiceWork; // if thread needs to be preserved
 
   friend class Face;
 };

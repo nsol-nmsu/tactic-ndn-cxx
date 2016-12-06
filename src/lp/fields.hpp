@@ -94,6 +94,12 @@ typedef FieldDecl<field_location_tags::Header,
                   PrefixAnnouncement,
                   tlv::PrefixAnnouncement> PrefixAnnouncementField;
 BOOST_CONCEPT_ASSERT((Field<PrefixAnnouncementField>));
+
+typedef FieldDecl<field_location_tags::Header,
+                          uint64_t,
+                          tlv::HopCountTag> HopCountTagField;
+BOOST_CONCEPT_ASSERT((Field<HopCountTagField>));
+
 /**
  * The value of the wire encoded field is the data between the provided iterators. During
  * encoding, the data is copied from the Buffer into the wire buffer.
@@ -119,7 +125,8 @@ typedef boost::mpl::set<
   AckField,
   TxSequenceField,
   NonDiscoveryField,
-  PrefixAnnouncementField
+  PrefixAnnouncementField,
+  HopCountTagField
   > FieldSet;
 
 } // namespace lp

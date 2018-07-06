@@ -51,21 +51,19 @@ Data::wireEncode(EncodingImpl<TAG>& encoder, bool wantUnsignedPortionOnly) const
   //            Name
   //            MetaInfo
   //            Content
-  //            SignatureInfo
-  //            SignatureValue
+  //            SignatureInfo?
+  //            SignatureValue?
 
   size_t totalLength = 0;
 
   // SignatureValue
-  if (!wantUnsignedPortionOnly) {
-    if (!m_signature) {
-      BOOST_THROW_EXCEPTION(Error("Requested wire format, but Data has not been signed"));
+  if( m_signature ) {
+    if( !wantUnsignedPortionOnly ) {
+        totalLength += encoder.prependBlock(m_signature.getValue());
     }
-    totalLength += encoder.prependBlock(m_signature.getValue());
+    // SignatureInfo
+    totalLength += encoder.prependBlock(m_signature.getInfo());
   }
-
-  // SignatureInfo
-  totalLength += encoder.prependBlock(m_signature.getInfo());
 
   // Content
   totalLength += encoder.prependBlock(getContent());
@@ -134,13 +132,17 @@ Data::wireDecode(const Block& wire)
   // Content
   m_content = m_wire.get(tlv::Content);
 
-  // SignatureInfo
-  m_signature.setInfo(m_wire.get(tlv::SignatureInfo));
 
-  // SignatureValue
-  Block::element_const_iterator val = m_wire.find(tlv::SignatureValue);
-  if (val != m_wire.elements_end()) {
-    m_signature.setValue(*val);
+  Block::element_const_iterator val;
+  
+  // Signature
+  val = m_wire.find( tlv::SignatureInfo );
+  if( val != m_wire.elements_end() ) {
+    m_signature.setInfo(m_wire.get(tlv::SignatureInfo));
+    m_signature.setValue( m_wire.get(tlv::SignatureValue) );
+  }
+  else {
+    m_signature = Signature();
   }
 }
 

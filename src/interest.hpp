@@ -27,6 +27,7 @@
 #include "packet-base.hpp"
 #include "selectors.hpp"
 #include "util/time.hpp"
+#include "signature.hpp"
 
 namespace ndn {
 
@@ -67,15 +68,22 @@ public:
   explicit
   Interest(const Block& wire);
 
-  /**
-   * @brief Fast encoding or block size estimation
+  /** @brief Fast encoding or block size estimation
+   *  @param encoder EncodingEstimator or EncodingBuffer instance
+   *  @param wantUnsignedPortionOnly If true, encoding doesn't include the signature value.
    */
   template<encoding::Tag TAG>
   size_t
-  wireEncode(EncodingImpl<TAG>& encoder) const;
+  wireEncode(EncodingImpl<TAG>& encoder, bool wantUnsignedPortionOnly = false) const;
 
-  /**
-   * @brief Encode to a wire format
+  /** @brief Finalize Interest packet encoding with the specified SignatureValue
+   *  @param encoder EncodingBuffer containing encoded Interest minus the signature
+   *  @param signatureValue SignatureValue element
+   */
+  const Block&
+  wireEncode(EncodingBuffer& encoder, const Block& signatureValue) const;
+  
+  /** @brief Encode to a wire format
    */
   const Block&
   wireEncode() const;
@@ -327,18 +335,87 @@ public: // Selectors
     m_wire.reset();
     return *this;
   }
+  
+  /** @brief Get Content
+   *
+   *  The Content value is accessible through value()/value_size() or value_begin()/value_end()
+   *  methods of the Block class.
+   */
+  const Block&
+  getContent() const;
+
+  /** @brief Set Content from a block
+   *
+   *  If block's TLV-TYPE is Content, it will be used directly as Interest's Content element.
+   *  If block's TLV-TYPE is not Content, it will be nested into a Content element.
+   *
+   *  @return a reference to this Data, to allow chaining
+   */
+  Interest&
+  setContent(const Block& block);
+
+  /** @brief Copy Content value from raw buffer
+   *  @param value pointer to the first octet of the value
+   *  @param valueSize size of the raw buffer
+   *  @return a reference to this Data, to allow chaining
+   */
+  Interest&
+  setContent(const uint8_t* value, size_t valueSize);
+
+  /** @brief Set Content from wire buffer
+   *  @param value Content value, which does not need to be a TLV element
+   *  @return a reference to this Data, to allow chaining
+   */
+  Interest&
+  setContent(const ConstBufferPtr& value);
+
+  /** @brief Get Signature
+   */
+  const Signature&
+  getSignature() const
+  {
+    return m_signature;
+  }
+
+  /** @brief Set Signature
+   *  @return a reference to this Data, to allow chaining
+   */
+  Interest&
+  setSignature(const Signature& signature);
+
+  /** @brief Set SignatureValue
+   *  @return a reference to this Data, to allow chaining
+   */
+  Interest&
+  setSignatureValue(const Block& value);
+  
+  Interest&
+  setRouteHash(uint64_t hash);
+  
+  Interest&
+  updateRouteHash(uint64_t fid);
+  
+  uint64_t
+  getRouteHash( void );
 
 private:
   Name m_name;
+  uint64_t  m_routeHash;
   Selectors m_selectors;
   mutable optional<uint32_t> m_nonce;
   time::milliseconds m_interestLifetime;
   DelegationList m_forwardingHint;
-
+  Block m_content;
+  Signature m_signature;
+  
   mutable Block m_wire;
 };
 
-NDN_CXX_DECLARE_WIRE_ENCODE_INSTANTIATIONS(Interest);
+extern template size_t
+Interest::wireEncode<encoding::EncoderTag>(EncodingBuffer&, bool) const;
+
+extern template size_t
+Interest::wireEncode<encoding::EstimatorTag>(EncodingEstimator&, bool) const;
 
 std::ostream&
 operator<<(std::ostream& os, const Interest& interest);

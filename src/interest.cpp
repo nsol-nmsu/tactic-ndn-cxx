@@ -37,6 +37,7 @@ static_assert(std::is_base_of<tlv::Error, Interest::Error>::value,
 
 Interest::Interest(const Name& name, time::milliseconds interestLifetime)
   : m_name(name)
+  , m_routeHash( 0 )
   , m_interestLifetime(interestLifetime)
 {
   if (interestLifetime < time::milliseconds::zero()) {
@@ -53,19 +54,36 @@ Interest::Interest(const Block& wire)
 
 template<encoding::Tag TAG>
 size_t
-Interest::wireEncode(EncodingImpl<TAG>& encoder) const
+Interest::wireEncode(EncodingImpl<TAG>& encoder, bool wantUnsignedPortionOnly) const
 {
   size_t totalLength = 0;
 
   // Interest ::= INTEREST-TYPE TLV-LENGTH
   //                Name
+  //                RouteHash
   //                Selectors?
   //                Nonce
   //                InterestLifetime?
   //                ForwardingHint?
+  //                Content?
+  //                SignatureInfo?
+  //                SignatureValue?
 
   // (reverse encoding)
 
+  // SignatureValue
+  if( m_signature ) {
+    if( !wantUnsignedPortionOnly ) {
+        totalLength += encoder.prependBlock(m_signature.getValue());
+    }
+    // SignatureInfo
+    totalLength += encoder.prependBlock(m_signature.getInfo());
+  }
+  
+  // Content
+  if( m_content.hasWire() )
+    totalLength += encoder.prependBlock( getContent() );
+  
   // ForwardingHint
   if (m_forwardingHint.size() > 0) {
     totalLength += m_forwardingHint.wireEncode(encoder);
@@ -88,6 +106,13 @@ Interest::wireEncode(EncodingImpl<TAG>& encoder) const
   if (hasSelectors()) {
     totalLength += getSelectors().wireEncode(encoder);
   }
+  
+  // RouteHash
+  totalLength += prependNonNegativeIntegerBlock(
+                    encoder,
+                    tlv::RouteHash,
+                    m_routeHash
+                 );
 
   // Name
   totalLength += getName().wireEncode(encoder);
@@ -97,7 +122,24 @@ Interest::wireEncode(EncodingImpl<TAG>& encoder) const
   return totalLength;
 }
 
-NDN_CXX_DEFINE_WIRE_ENCODE_INSTANTIATIONS(Interest);
+template size_t
+Interest::wireEncode<encoding::EncoderTag>(EncodingBuffer&, bool) const;
+
+template size_t
+Interest::wireEncode<encoding::EstimatorTag>(EncodingEstimator&, bool) const;
+
+const Block&
+Interest::wireEncode(EncodingBuffer& encoder, const Block& signatureValue) const
+{
+  size_t totalLength = encoder.size();
+  totalLength += encoder.appendBlock(signatureValue);
+
+  encoder.prependVarNumber(totalLength);
+  encoder.prependVarNumber(tlv::Data);
+
+  const_cast<Interest*>(this)->wireDecode(encoder.block());
+  return m_wire;
+}
 
 const Block&
 Interest::wireEncode() const
@@ -163,6 +205,16 @@ Interest::wireDecode(const Block& wire)
   }
   else {
     m_forwardingHint = DelegationList();
+  }
+  
+  // Signature
+  val = m_wire.find( tlv::SignatureInfo );
+  if( val != m_wire.elements_end() ) {
+    m_signature.setInfo(m_wire.get(tlv::SignatureInfo));
+    m_signature.setValue( m_wire.get(tlv::SignatureValue) );
+  }
+  else {
+    m_signature = Signature();
   }
 }
 
@@ -347,6 +399,79 @@ Interest::setForwardingHint(const DelegationList& value)
   return *this;
 }
 
+const Block&
+Interest::getContent() const
+{
+  if (!m_content.hasWire()) {
+    const_cast<Block&>(m_content).encode();
+  }
+  return m_content;
+}
+
+Interest&
+Interest::setContent(const Block& block)
+{
+  m_wire.reset();
+
+  if (block.type() == tlv::Content) {
+    m_content = block;
+  }
+  else {
+    m_content = Block(tlv::Content, block);
+  }
+
+  return *this;
+}
+
+Interest&
+Interest::setContent(const uint8_t* value, size_t valueSize)
+{
+  m_wire.reset();
+  m_content = makeBinaryBlock(tlv::Content, value, valueSize);
+  return *this;
+}
+
+Interest&
+Interest::setContent(const ConstBufferPtr& value)
+{
+  m_wire.reset();
+  m_content = Block(tlv::Content, value);
+  return *this;
+}
+
+Interest&
+Interest::setSignature(const Signature& signature)
+{
+  m_wire.reset();
+  m_signature = signature;
+  return *this;
+}
+
+Interest&
+Interest::setSignatureValue(const Block& value)
+{
+  m_wire.reset();
+  m_signature.setValue(value);
+  return *this;
+}
+
+Interest&
+Interest::setRouteHash(uint64_t hash) {
+    m_routeHash = hash;
+    return *this;
+}
+
+Interest&
+Interest::updateRouteHash(uint64_t fid) {
+    m_routeHash ^= fid;
+    return *this;
+}
+
+uint64_t
+Interest::getRouteHash( void ) {
+    return m_routeHash;
+}
+  
 // ---- operators ----
 
 std::ostream&

@@ -89,7 +89,6 @@ enum {
   KeyDigest       = 29,
   LinkPreference  = 30,
   LinkDelegation  = 31,
-  RouteHash       = 32,
 
   AppPrivateBlock1 = 128,
   AppPrivateBlock2 = 32767

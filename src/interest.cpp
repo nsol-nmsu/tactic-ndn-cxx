@@ -37,8 +37,8 @@ static_assert(std::is_base_of<tlv::Error, Interest::Error>::value,
 
 Interest::Interest(const Name& name, time::milliseconds interestLifetime)
   : m_name(name)
-  , m_routeHash( 0 )
   , m_interestLifetime(interestLifetime)
+  , m_hasContent( false )
 {
   if (interestLifetime < time::milliseconds::zero()) {
     BOOST_THROW_EXCEPTION(std::invalid_argument("InterestLifetime must be >= 0"));
@@ -60,7 +60,6 @@ Interest::wireEncode(EncodingImpl<TAG>& encoder, bool wantUnsignedPortionOnly) c
 
   // Interest ::= INTEREST-TYPE TLV-LENGTH
   //                Name
-  //                RouteHash
   //                Selectors?
   //                Nonce
   //                InterestLifetime?
@@ -81,7 +80,7 @@ Interest::wireEncode(EncodingImpl<TAG>& encoder, bool wantUnsignedPortionOnly) c
   }
   
   // Content
-  if( m_content.hasWire() )
+  if( m_hasContent )
     totalLength += encoder.prependBlock( getContent() );
   
   // ForwardingHint
@@ -106,13 +105,6 @@ Interest::wireEncode(EncodingImpl<TAG>& encoder, bool wantUnsignedPortionOnly) c
   if (hasSelectors()) {
     totalLength += getSelectors().wireEncode(encoder);
   }
-  
-  // RouteHash
-  totalLength += prependNonNegativeIntegerBlock(
-                    encoder,
-                    tlv::RouteHash,
-                    m_routeHash
-                 );
 
   // Name
   totalLength += getName().wireEncode(encoder);
@@ -205,6 +197,16 @@ Interest::wireDecode(const Block& wire)
   }
   else {
     m_forwardingHint = DelegationList();
+  }
+
+  // Content
+  val = m_wire.find(tlv::Content);
+  if( val != m_wire.elements_end() ) {
+    m_content = *val;
+    m_hasContent = true;
+  }
+  else {
+    m_hasContent = false;
   }
   
   // Signature
@@ -419,7 +421,7 @@ Interest::setContent(const Block& block)
   else {
     m_content = Block(tlv::Content, block);
   }
-
+  m_hasContent = true;
   return *this;
 }
 
@@ -428,6 +430,7 @@ Interest::setContent(const uint8_t* value, size_t valueSize)
 {
   m_wire.reset();
   m_content = makeBinaryBlock(tlv::Content, value, valueSize);
+  m_hasContent = true;
   return *this;
 }
 
@@ -436,6 +439,7 @@ Interest::setContent(const ConstBufferPtr& value)
 {
   m_wire.reset();
   m_content = Block(tlv::Content, value);
+  m_hasContent = true;
   return *this;
 }
 
@@ -453,23 +457,6 @@ Interest::setSignatureValue(const Block& value)
   m_wire.reset();
   m_signature.setValue(value);
   return *this;
-}
-
-Interest&
-Interest::setRouteHash(uint64_t hash) {
-    m_routeHash = hash;
-    return *this;
-}
-
-Interest&
-Interest::updateRouteHash(uint64_t fid) {
-    m_routeHash ^= fid;
-    return *this;
-}
-
-uint64_t
-Interest::getRouteHash( void ) {
-    return m_routeHash;
 }
   
 // ---- operators ----

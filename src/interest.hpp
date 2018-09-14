@@ -388,24 +388,15 @@ public: // Selectors
    */
   Interest&
   setSignatureValue(const Block& value);
-  
-  Interest&
-  setRouteHash(uint64_t hash);
-  
-  Interest&
-  updateRouteHash(uint64_t fid);
-  
-  uint64_t
-  getRouteHash( void );
 
 private:
   Name m_name;
-  uint64_t  m_routeHash;
   Selectors m_selectors;
   mutable optional<uint32_t> m_nonce;
   time::milliseconds m_interestLifetime;
   DelegationList m_forwardingHint;
   Block m_content;
+  bool  m_hasContent;
   Signature m_signature;
   
   mutable Block m_wire;
